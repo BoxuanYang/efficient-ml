@@ -9,6 +9,7 @@
 #include "common.h"
 
 namespace matmul {
+// Compute C(float) = A(INT8 activation) B^T(INT4 weight)
 void MatmulOperator::mat_mul_reference(struct matmul_params *params) {
     const struct matrix *A = &params->A, *B = &params->B, *C = &params->C;
     const int block_size = params->block_size;  // block_size = 32
@@ -17,15 +18,17 @@ void MatmulOperator::mat_mul_reference(struct matmul_params *params) {
     quantize_fp32_to_int8(A->data_ptr, A->int8_data_ptr, params->A_scales, A->row * A->column, block_size);
 
     int m = C->row, n = C->column, k = A->column;
+
+    // printf("m: %d, n: %d, k: %d\n", m, n, k);
     // A: m x k; B: n x k; C: m x n
     for (int row = 0; row < m; row++) {
         for (int col = 0; col < n; col++) {
             float acc = 0;
-            // Compute each block
+            // Compute each block, C[row][col] += A[row][ch] * B^T[col][ch]
             for (int ch = 0; ch < k;) {
-                // pointer of the int4 weights
+                // pointer of the int4 weights, load B[col][ch]
                 uint8_t *w_int4 = &B->int4_data_ptr[(col * k + ch) / 2];
-                // pointer of the int8 activation
+                // pointer of the int8 activation, load A[row][ch]
                 const signed char *a_int8 = &A->int8_data_ptr[row * k + ch];
                 // scale of weight
                 float s_w = params->scales[(col * k + ch) / block_size];
@@ -73,6 +76,8 @@ void MatmulOperator::mat_mul_reference(struct matmul_params *params) {
                 // process 32 bytes of weigths (256 bit) = 2 blocks
                 // intermediate variable to store sum of integer multiplication and accumulation
                 int intermediate_sum = 0, intermediate_sum_2nd = 0;
+
+                // Load 
                 for (int qj = 0; qj < 32; qj++) {
                     // decode a packed byte into two int8 in the range of (-8, 7)
                     uint8_t packed_int4_0 = w_int4[qj];

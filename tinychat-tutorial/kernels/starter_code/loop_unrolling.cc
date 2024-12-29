@@ -24,11 +24,15 @@ void MatmulOperator::mat_mul_loop_unrolling(struct matmul_params *params) {
             float acc1 = 0;
             float acc2 = 0;
             float acc3 = 0;
-            // Compute each block
+            // Compute:
+            // C[row][col]     += A[row][ch] * B^T[col][ch]
+            // C[row][col + 1] += A[row][ch] * B^T[col + 1][ch]
+            // C[row][col + 2] += A[row][ch] * B^T[col + 2][ch]
+            // C[row][col + 3] += A[row][ch] * B^T[col + 3][ch]
             for (int ch = 0; ch < k;) {
-                // pointer of the int8 activation
+                // pointer of the int8 activation, load A[row][ch]
                 const signed char *a_int8 = &A->int8_data_ptr[row * k + ch];
-                // pointer of the int4 weights
+                // pointer of the int4 weights, load B[col][ch] - B[col+3][ch]
                 uint8_t *w0_int4 = &B->int4_data_ptr[(col * k + ch) / 2];
                 uint8_t *w1_int4 = &B->int4_data_ptr[((col + 1) * k + ch) / 2];
                 uint8_t *w2_int4 = &B->int4_data_ptr[((col + 2) * k + ch) / 2];
@@ -88,16 +92,41 @@ void MatmulOperator::mat_mul_loop_unrolling(struct matmul_params *params) {
                     intermediate_sum3_2nd = 0;
                 for (int qj = 0; qj < 32; qj++) {
                     // TODO: decode a packed byte into two int8 in the range of (-8, 7)
+                    uint8_t packed_weight_0 = w0_int4[qj];
+                    signed char weight_0_1st = (packed_weight_0 & 0xF) - 8.0;
+                    signed char weight_0_2nd = (packed_weight_0 >> 4) - 8.0;
+                    intermediate_sum0 += weight_0_1st * a_int8[qj];
+                    intermediate_sum0_2nd += weight_0_2nd * a_int8[qj + 32];
 
+                    uint8_t packed_weight_1 = w1_int4[qj];
+                    signed char weight_1_1st = (packed_weight_1 & 0xF) - 8.0;
+                    signed char weight_1_2nd = (packed_weight_1 >> 4) - 8.0;
+                    intermediate_sum1 += weight_1_1st * a_int8[qj];
+                    intermediate_sum1_2nd += weight_1_2nd * a_int8[qj + 32];
+
+                    uint8_t packed_weight_2 = w2_int4[qj];
+                    signed char weight_2_1st = (packed_weight_2 & 0xF) - 8.0;
+                    signed char weight_2_2nd = (packed_weight_2 >> 4) - 8.0;
+                    intermediate_sum2 += weight_2_1st * a_int8[qj];
+                    intermediate_sum2_2nd += weight_2_2nd * a_int8[qj + 32];
+
+                    uint8_t packed_weight_3 = w3_int4[qj];
+                    signed char weight_3_1st = (packed_weight_3 & 0xF) - 8.0;
+                    signed char weight_3_2nd = (packed_weight_3 >> 4) - 8.0;
+                    intermediate_sum3 += weight_3_1st * a_int8[qj];
+                    intermediate_sum3_2nd += weight_3_2nd * a_int8[qj + 32];
                     // TODO: int8 multiply and accumulate operation
                 }
                 // dequantize the sum into floating point
                 acc0 += (float)intermediate_sum0 * s_a * s_w0;
                 acc0 += (float)intermediate_sum0_2nd * s_a_2nd * s_w0_2nd;
+
                 acc1 += (float)intermediate_sum1 * s_a * s_w1;
                 acc1 += (float)intermediate_sum1_2nd * s_a_2nd * s_w1_2nd;
+
                 acc2 += (float)intermediate_sum2 * s_a * s_w2;
                 acc2 += (float)intermediate_sum2_2nd * s_a_2nd * s_w2_2nd;
+
                 acc3 += (float)intermediate_sum3 * s_a * s_w3;
                 acc3 += (float)intermediate_sum3_2nd * s_a_2nd * s_w3_2nd;
                 // process two blocks
